@@ -34,7 +34,7 @@ export class GuildsComponent implements OnInit, AfterViewInit {
   async ngOnInit() {
     await this.service.init();
 
-    (this.tag) ? this.loadTagLayout() : this.loadGuilds();
+    (this.tag) ? this.setTagLayout(this.tag) : this.loadGuilds();
 
     this.initialized = true;    
   }
@@ -54,8 +54,6 @@ export class GuildsComponent implements OnInit, AfterViewInit {
 
     this.guilds = guilds;
     this.savedGuilds = saved;
-
-    this.setTagLayout(this.tag);
   }
 
   ngAfterViewInit() {
@@ -68,13 +66,16 @@ export class GuildsComponent implements OnInit, AfterViewInit {
 
   private loadGuilds(page = 1) {
     const { guilds, saved } = this.service.getBumpedGuilds();
+    
     this.guilds = guilds;
     this.savedGuilds = saved;
 
     this.resetPaginator(page);
   }
   
-  search(query: string) {
+  async search(query: string) {
+    await this.service.init();
+
     this.query = query;
 
     const { guilds, saved } = this.service.searchGuilds(query);
@@ -111,6 +112,7 @@ export class GuildsComponent implements OnInit, AfterViewInit {
     this.tag = tag;
     
     this.resetPaginator();
+    this.loadTagLayout();
   }
 
   previousPage() {

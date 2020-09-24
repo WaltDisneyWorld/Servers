@@ -36,23 +36,25 @@ export class GuildsService {
   }
 
   async refreshGuilds() {
-    const guilds = await this.http.get(`${this.endpoint}`).toPromise() as any;
+    const { saved, guilds } = await this.http.get(`${this.endpoint}`).toPromise() as any;
 
-    this._savedGuilds = guilds.saved
-      .sort((a, b) => b.votes.length - a.votes.length);    
+    this._savedGuilds = saved
+      .filter(s => guilds.some(g => g.id === s._id))
+      .sort((a, b) => b.votes.length - a.votes.length);
 
     const ids = this.savedGuilds.map(g => g._id);
-    this._guilds = guilds.guilds.filter(g => ids.includes(g.id));
+    this._guilds = guilds.filter(g => ids.includes(g.id));
   }
   async refreshUserGuilds() {
     await this.userService.init(); 
 
-    const userSavedGuilds = this.savedGuilds
-      .filter(g => g.ownerId === this.userService.user.id);
-    this._userSavedGuilds = userSavedGuilds;
+    const userGuilds = this.guilds
+      .filter(g => g.managerIds.includes(this.userService.user.id));
+    this._userGuilds = userGuilds;
 
-    const ids = userSavedGuilds.map(g => g._id);
-    this._userGuilds = ids.map(id => this.guilds.find(g => g.id === id));
+    this._userSavedGuilds = userGuilds
+      .map(g => g.id)
+      .filter(id => this.getSavedGuild(id));
   }
   getSavedLog(id: string) {
     return this.http.get(`${this.endpoint}/${id}/log?key=${this.key}`).toPromise() as Promise<any>;
@@ -71,7 +73,8 @@ export class GuildsService {
 
   getBumpedGuilds() {
     const savedGuilds = [...this.savedGuilds]
-      .sort((a, b) => a.lastBumpAt > b.lastBumpAt ? -1 : 1);
+      .filter(g => g.lastBumpAt)
+      .sort((a, b) => (a.lastBumpAt > b.lastBumpAt) ? -1 : 1);
 
     const ids = savedGuilds.map(g => g._id);
     const guilds = ids.map(id => this.guilds.find(g => g.id === id));
@@ -79,18 +82,16 @@ export class GuildsService {
     return { guilds, saved: savedGuilds };
   }
   getTopGuilds() {
-    const savedGuilds = [...this.savedGuilds]
-      .sort((a, b) => b.votes.length - a.votes.length);
-
-    const ids = savedGuilds.map(g => g._id);
-    const guilds = ids.map(id => this.guilds.find(g => g.id === id));
-
-    return { guilds, saved: savedGuilds };
+    return {
+      guilds: this.savedGuilds
+        .map(sb => this.guilds.find(g => g.id === sb._id)),
+      saved: [...this.savedGuilds]
+        .sort((a, b) => b.votes.length - a.votes.length)
+    };
   }
   getTaggedGuilds(tagName: string) {
     const savedGuilds = this.savedGuilds
-      .filter(g => g.approvedAt &&
-        g.listing?.tags
+      .filter(g => g.listing?.tags
         .some(n => n === tagName));
 
     const ids = savedGuilds.map(g => g._id);
@@ -118,24 +119,38 @@ export class GuildsService {
     return { guilds, saved: savedGuilds };
   }
   searchGuilds(query: string) {
-    const fuse = new Fuse(this.savedGuilds, {
+    const queryGuilds = this.savedGuilds
+      .map(saved => {
+        const guild = this.guilds.find(g => g.id === saved._id);
+        return {
+          id: guild?.id,
+          name: guild?.name,
+          ownerId: saved.ownerId,
+          listing: saved?.listing ?? {}
+        };
+      });
+
+    const fuse = new Fuse(queryGuilds, {
       includeScore: true,
       keys: [
-        { name: 'listing.overview', weight: 1 },
+        { name: 'id', weight: 1 },
+        { name: 'ownerId', weight: 1 },
+        { name: 'name', weight: 0.8 },
+        { name: 'listing.overview', weight: 0.6 },
         { name: 'listing.body', weight: 0.5 },
         { name: 'listing.tags', weight: 0.3 }
       ]
     });
-    
-    const savedGuilds = fuse
+
+    const searchGuilds = fuse
       .search(query)
-      .map(r => r.item);    
+      .map(r => r.item);
 
-    const ids = savedGuilds.map(g => g._id);
-    const guilds = this.guilds
-      .filter(b => ids.includes(b.id));    
-
-    return { guilds, saved: savedGuilds };
+    const ids = searchGuilds.map(g => g.id);
+    return {
+      guilds: this.guilds.filter(g => ids.includes(g.id)),
+      saved: this.savedGuilds.filter(g => ids.includes(g._id))
+    };
   }
 
   updateGuild(id: string, value: any) {
@@ -172,6 +187,11 @@ export class GuildsService {
 
   report(id: string, reason: string) {
     return this.http.get(`${this.endpoint}/${id}/report?key=${this.key}&reason=${reason}`).toPromise() as Promise<any>;
+  }
+
+  canManage(id: string) {
+    const guild = this.guilds.find(g => g?.id === id);
+    return guild?.managerIds.includes(this.userService.user?.id); 
   }
 }
 
